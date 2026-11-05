@@ -236,6 +236,100 @@ export function matchesSearch(name, query) {
   return !q || fold(name).includes(fold(q));
 }
 
+// ---------- 自己ベスト ----------
+
+const better = (current, value, date) => (!current || value > current.value ? { value, date } : current);
+
+/** 指定した種目の自己ベスト。until より前の記録だけに絞れる。 */
+export function personalBests(data, name, { until = null, excludeId = null } = {}) {
+  const bests = { oneRepMax: null, weight: null, reps: null };
+  for (const workout of data.workouts) {
+    if (workout.id === excludeId) continue;
+    if (until && toDate(workout.date).getTime() >= toDate(until).getTime()) continue;
+    for (const exercise of workout.exercises) {
+      if (exercise.name !== name) continue;
+      for (const set of recordedSets(exercise)) {
+        if (set.weightKg > 0) {
+          bests.oneRepMax = better(bests.oneRepMax, epley(set.weightKg, set.reps), workout.date);
+          bests.weight = better(bests.weight, set.weightKg, workout.date);
+        } else {
+          // 自重の種目は回数で比べる
+          bests.reps = better(bests.reps, set.reps, workout.date);
+        }
+      }
+    }
+  }
+  return bests;
+}
+
+/**
+ * このトレーニングで更新した自己ベスト。
+ * 種目を初めて記録したときは、すべてが更新になってしまうので数えない。
+ * 同じ項目を複数のセットで更新しても、一番良いセットにだけ付ける。
+ */
+export function workoutRecords(data, workout) {
+  const bySet = new Map();
+  const names = new Set();
+  for (const name of new Set(workout.exercises.map((e) => e.name))) {
+    const prior = personalBests(data, name, { until: workout.date, excludeId: workout.id });
+    const sets = workout.exercises.filter((e) => e.name === name).flatMap(recordedSets);
+    const metrics = [
+      ['推定1RM', prior.oneRepMax, (s) => (s.weightKg > 0 ? epley(s.weightKg, s.reps) : null)],
+      ['重量', prior.weight, (s) => (s.weightKg > 0 ? s.weightKg : null)],
+      ['回数', prior.reps, (s) => (s.weightKg > 0 ? null : s.reps)],
+    ];
+    for (const [label, previous, valueOf] of metrics) {
+      if (!previous) continue;
+      let top = null;
+      let topValue = previous.value;
+      for (const set of sets) {
+        const value = valueOf(set);
+        if (value !== null && value > topValue) {
+          top = set;
+          topValue = value;
+        }
+      }
+      if (top) {
+        bySet.set(top.id, [...(bySet.get(top.id) ?? []), label]);
+        names.add(name);
+      }
+    }
+  }
+  return { bySet, exerciseCount: names.size };
+}
+
+/** 記録のある全種目の自己ベスト（新しく使った順） */
+export function allPersonalBests(data) {
+  return usedExerciseNames(data).map((name) => ({ name, ...personalBests(data, name) }));
+}
+
+export function fmtBests(bests) {
+  return [
+    bests.oneRepMax ? `推定1RM ${fmtKg(bests.oneRepMax.value)}kg` : null,
+    bests.weight ? `重量 ${fmtKg(bests.weight.value)}kg` : null,
+    bests.reps ? `${bests.reps.value}回` : null,
+  ].filter(Boolean).join('・');
+}
+
+// ---------- 部位別の集計 ----------
+
+/** start 以降の部位別のセット数と総負荷。セットのない部位も0で返す。 */
+export function muscleSummary(data, start) {
+  const groups = Object.fromEntries(Object.keys(MUSCLE_GROUPS).map((key) => [key, { sets: 0, volume: 0 }]));
+  const from = toDate(start).getTime();
+  for (const workout of data.workouts) {
+    if (toDate(workout.date).getTime() < from) continue;
+    for (const exercise of workout.exercises) {
+      const group = groups[exercise.group] ?? groups.other;
+      for (const set of recordedSets(exercise)) {
+        group.sets += 1;
+        group.volume += set.weightKg * set.reps;
+      }
+    }
+  }
+  return Object.entries(groups).map(([key, value]) => ({ key, label: MUSCLE_GROUPS[key], ...value }));
+}
+
 // ---------- 食品 ----------
 
 const round1 = (v) => Math.round(v * 10) / 10;

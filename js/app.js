@@ -3,11 +3,11 @@ import { EXERCISES, FOODS } from './catalog.js';
 import { balanceChart, lineChart } from './charts.js';
 import {
   ACTIVITY, EQUIPMENT, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
-  addDays, ageOn, balanceSummary, bmr, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
-  fmtDate, fmtKcal, fmtKg, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
-  newId, normalizeData, oneRepMaxHistory, parseDecimal, parseInteger, previousPerformance, recentMeals, recordWeight,
+  addDays, ageOn, allPersonalBests, balanceSummary, bmr, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
+  fmtBests, fmtDate, fmtKcal, fmtKg, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
+  muscleSummary, newId, normalizeData, oneRepMaxHistory, parseDecimal, parseInteger, personalBests, previousPerformance, recentMeals, recordWeight,
   recordedSets, sameDay, setCountOf, setMealAmount, startOfDay, toDate, usedExerciseNames, volumeOf, weeklyWeightChange,
-  weightOn, workoutBurn,
+  weightOn, workoutBurn, workoutRecords,
 } from './logic.js';
 import { createStore } from './store.js';
 
@@ -45,6 +45,7 @@ const ICONS = {
   meal: stroke('<path d="M7 3v8M4 3v5a3 3 0 0 0 6 0V3M7 11v10M17 3c-2 1-3 4-3 7 0 2 1 3 3 3zm0 10v8"/>'),
   trends: stroke('<path d="M4 4v16h16"/><path d="m8 15 3.5-4 3 2.5L20 7"/>'),
   settings: stroke('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/>'),
+  star: stroke('<path d="m12 4 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/>'),
   plus: stroke('<path d="M12 5v14M5 12h14"/>'),
   minus: stroke('<path d="M5 12h14"/>'),
   close: stroke('<path d="m6 6 12 12M18 6 6 18"/>'),
@@ -208,12 +209,19 @@ function todayView() {
         workouts.length === 0 ? h('p', { class: 'muted' }, 'まだ記録がありません。筋トレタブから始められます。') : null,
         workouts.map((w) => h('div', { class: 'stack-sm' },
           h('p', null, w.exercises.map((e) => e.name).join('、') || '種目なし'),
-          h('p', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg・${w.durationMinutes}分`)))),
+          h('p', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg・${w.durationMinutes}分`),
+          recordLine(w)))),
       h('div', { class: 'card card-row' },
         h('div', null, h('h2', null, '体重'), h('p', { class: 'value' }, weight === null ? '未記録' : `${fmtKg(weight)} kg`)),
         button('記録する', () => push({ type: 'weightEntry' }), 'tonal')),
     ],
   });
+}
+
+/** このトレーニングで更新した自己ベストの数。なければ何も出さない。 */
+function recordLine(workout) {
+  const { exerciseCount } = workoutRecords(data(), workout);
+  return exerciseCount ? h('span', { class: 'record small' }, icon('star'), `自己ベスト更新 ${exerciseCount}種目`) : null;
 }
 
 function balanceCard(b) {
@@ -305,7 +313,8 @@ function workoutsView() {
       h('span', { class: 'list-main' },
         h('strong', null, fmtDate(w.date)),
         h('span', { class: 'clamp' }, w.exercises.map((e) => e.name).join('、') || 'メモのみ'),
-        h('span', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg`)),
+        h('span', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg`),
+        recordLine(w)),
       icon('right')))),
   });
 }
@@ -349,8 +358,10 @@ function workoutDetailView(view) {
     const weight = weightOn(data(), workout.date) ?? 0;
     summary.textContent = `推定消費 ${fmtKcal(workoutBurn(workout, weight))} kcal・総負荷 ${fmtKcal(volumeOf(workout))} kg`;
   };
+  const badgeRefreshers = [];
   const change = () => {
     refresh();
+    badgeRefreshers.forEach((update) => update());
     commit();
   };
   refresh();
@@ -389,7 +400,7 @@ function workoutDetailView(view) {
             render();
           }, '強度'))),
       summary,
-      workout.exercises.map((exercise) => exerciseBlock(workout, exercise, change)),
+      workout.exercises.map((exercise) => exerciseBlock(workout, exercise, change, badgeRefreshers)),
       button('種目を追加', () => push({
         type: 'exercisePicker',
         onSelect: (definition) => {
@@ -416,13 +427,30 @@ function workoutDetailView(view) {
   });
 }
 
-function exerciseBlock(workout, exercise, change) {
+function exerciseBlock(workout, exercise, change, badgeRefreshers) {
   const previous = previousPerformance(data(), exercise.name, workout.date);
+  const bests = fmtBests(personalBests(data(), exercise.name, { until: workout.date, excludeId: workout.id }));
   const rows = h('div', { class: 'sets' });
+  const badges = new Map();
+  const refreshBadges = () => {
+    const { bySet } = workoutRecords(data(), workout);
+    for (const [id, badge] of badges) {
+      const labels = bySet.get(id);
+      badge.hidden = !labels;
+      badge.lastChild.textContent = labels ? `自己ベスト更新：${labels.join('・')}` : '';
+    }
+  };
+  badgeRefreshers.push(refreshBadges);
+  const recordBadge = (set) => {
+    const badge = h('div', { class: 'record set-record', role: 'status' }, icon('star'), h('span'));
+    badges.set(set.id, badge);
+    return badge;
+  };
   const drawSets = () => {
+    badges.clear();
     rows.replaceChildren(
       h('div', { class: 'set-row set-head', 'aria-hidden': 'true' }, h('span', null, 'セット'), h('span', null, 'kg'), h('span', null, '回'), h('span')),
-      ...exercise.sets.map((set, index) => h('div', { class: 'set-row' },
+      ...exercise.sets.flatMap((set, index) => [h('div', { class: 'set-row' },
         h('span', { class: 'set-no tnum' }, index + 1),
         numberField({
           value: set.weightKg, placeholder: '自重', label: `${index + 1}セット目の重量`,
@@ -436,8 +464,9 @@ function exerciseBlock(workout, exercise, change) {
           exercise.sets = exercise.sets.filter((s) => s.id !== set.id);
           drawSets();
           change();
-        }, 'quiet'))),
+        }, 'quiet')), recordBadge(set)]),
     );
+    refreshBadges();
   };
   drawSets();
   return h('section', { class: 'section' },
@@ -463,7 +492,8 @@ function exerciseBlock(workout, exercise, change) {
           change();
         },
       }, icon('plus'), 'セットを追加')),
-    previous ? footnote(`前回: ${recordedSets(previous).map(fmtSet).join('、')}`) : null);
+    previous ? footnote(`前回: ${recordedSets(previous).map(fmtSet).join('、')}`) : null,
+    bests ? footnote(`これまでのベスト: ${bests}`) : null);
 }
 
 function allExercises() {
@@ -826,6 +856,7 @@ function trendsView() {
         render();
       }, '期間'),
       balanceTrendCard(days),
+      muscleCard(start),
       lineCard({
         title: '体重',
         action: button('記録一覧', () => push({ type: 'weightHistory' }), 'link small'),
@@ -836,8 +867,53 @@ function trendsView() {
         action: names.length ? select(Object.fromEntries(names.map((n) => [n, n])), exercise, (v) => { state.exerciseName = v; render(); }, '種目') : null,
         points: rmPoints, start, emptyTitle: 'この期間の記録はありません', emptyDetail: '重量と回数を記録すると表示されます。',
       }),
+      bestsCard(),
     ],
   });
+}
+
+/** 部位別のセット数。バーは1色で、数値を横に直接書く。 */
+function muscleCard(start) {
+  const summary = muscleSummary(data(), start);
+  const total = summary.reduce((sum, g) => sum + g.sets, 0);
+  const head = h('h2', null, '部位別のセット数');
+  if (!total) return h('div', { class: 'card' }, head, empty('この期間のトレーニングの記録はありません', '回数を入力したセットを集計します。'));
+  const max = Math.max(...summary.map((g) => g.sets));
+  // 全身とその他は、記録がなければ行を出さない
+  const rows = summary.filter((g) => g.sets > 0 || !['fullBody', 'other'].includes(g.key));
+  return h('div', { class: 'card' },
+    head,
+    h('p', { class: 'muted small tnum' }, `合計 ${total}セット`),
+    h('div', { class: 'muscle-list' }, rows.map((g) => {
+      const bar = h('span', { class: 'muscle-bar' });
+      bar.style.width = `${(g.sets / max) * 100}%`;
+      return h('div', { class: 'muscle-row' },
+        h('span', { class: 'muscle-name' }, g.label),
+        h('span', { class: 'muscle-track' }, bar),
+        h('span', { class: 'muscle-value tnum' }, `${g.sets}セット`));
+    })),
+    h('details', { class: 'daily' },
+      h('summary', null, '総負荷も見る'),
+      h('table', null,
+        h('thead', null, h('tr', null, h('th', { scope: 'col' }, '部位'), h('th', { scope: 'col' }, 'セット'), h('th', { scope: 'col' }, '総負荷'))),
+        h('tbody', null, rows.map((g) => h('tr', null,
+          h('td', null, g.label), h('td', { class: 'tnum' }, g.sets), h('td', { class: 'tnum' }, `${fmtKcal(g.volume)} kg`)))))));
+}
+
+/** 全期間の自己ベスト。期間の切り替えには連動しない。 */
+function bestsCard() {
+  const all = allPersonalBests(data());
+  const head = h('h2', null, '自己ベスト（全期間）');
+  if (!all.length) return h('div', { class: 'card' }, head, empty('まだ記録がありません', '回数を入力すると表示されます。'));
+  const dateOf = (b) => b.oneRepMax?.date ?? b.reps?.date;
+  const item = (b) => h('div', { class: 'best-row' },
+    h('p', null, b.name),
+    h('p', { class: 'muted small tnum' }, fmtBests(b)),
+    h('p', { class: 'muted tiny tnum' }, `${fmtDate(dateOf(b))}に達成`));
+  return h('div', { class: 'card' },
+    head,
+    all.slice(0, 5).map(item),
+    all.length > 5 ? h('details', { class: 'daily' }, h('summary', null, `残り${all.length - 5}種目を見る`), all.slice(5).map(item)) : null);
 }
 
 function balanceTrendCard(days) {
