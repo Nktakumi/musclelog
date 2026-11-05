@@ -186,6 +186,21 @@ export const epley = (weightKg, reps) => {
   return reps === 1 ? weightKg : weightKg * (1 + reps / 30);
 };
 
+/** 種目ごとの計算式の除数。一覧にない種目はEpley式を使う。 */
+const ONE_RM_DIVISORS = {
+  'ベンチプレス（バーベル）': 40,
+  'スクワット（バーベル）': 33.3,
+  'デッドリフト（バーベル）': 33.3,
+};
+
+/** 推定1RM。1回だけ挙げたセットは、その重量をそのまま使う。 */
+export function estimateOneRepMax(name, weightKg, reps) {
+  const divisor = ONE_RM_DIVISORS[name];
+  if (!divisor) return epley(weightKg, reps);
+  if (!(weightKg > 0) || !(reps > 0)) return null;
+  return reps === 1 ? weightKg : (weightKg * reps) / divisor + weightKg;
+}
+
 export const recordedSets = (exercise) => exercise.sets.filter((s) => s.reps > 0);
 export const volumeOf = (workout) =>
   workout.exercises.reduce((sum, e) => sum + e.sets.reduce((s, set) => s + set.weightKg * set.reps, 0), 0);
@@ -210,7 +225,7 @@ export function oneRepMaxHistory(data, name) {
   for (const workout of data.workouts) {
     const values = workout.exercises
       .filter((e) => e.name === name)
-      .flatMap((e) => e.sets.map((s) => epley(s.weightKg, s.reps)))
+      .flatMap((e) => e.sets.map((s) => estimateOneRepMax(name, s.weightKg, s.reps)))
       .filter((v) => v !== null);
     if (!values.length) continue;
     const key = dayKey(workout.date);
@@ -250,7 +265,7 @@ export function personalBests(data, name, { until = null, excludeId = null } = {
       if (exercise.name !== name) continue;
       for (const set of recordedSets(exercise)) {
         if (set.weightKg > 0) {
-          bests.oneRepMax = better(bests.oneRepMax, epley(set.weightKg, set.reps), workout.date);
+          bests.oneRepMax = better(bests.oneRepMax, estimateOneRepMax(name, set.weightKg, set.reps), workout.date);
           bests.weight = better(bests.weight, set.weightKg, workout.date);
         } else {
           // 自重の種目は回数で比べる
@@ -274,7 +289,7 @@ export function workoutRecords(data, workout) {
     const prior = personalBests(data, name, { until: workout.date, excludeId: workout.id });
     const sets = workout.exercises.filter((e) => e.name === name).flatMap(recordedSets);
     const metrics = [
-      ['推定1RM', prior.oneRepMax, (s) => (s.weightKg > 0 ? epley(s.weightKg, s.reps) : null)],
+      ['推定1RM', prior.oneRepMax, (s) => (s.weightKg > 0 ? estimateOneRepMax(name, s.weightKg, s.reps) : null)],
       ['重量', prior.weight, (s) => (s.weightKg > 0 ? s.weightKg : null)],
       ['回数', prior.reps, (s) => (s.weightKg > 0 ? null : s.reps)],
     ];
