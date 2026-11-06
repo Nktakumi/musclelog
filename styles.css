@@ -379,6 +379,7 @@ textarea:focus { outline: none; }
   box-shadow: var(--shadow);
 }
 .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dialog .tonal.wide { background: var(--accent-soft); }
 .dialog-actions button:first-child { min-height: 44px; border-radius: 10px; background: var(--surface-2); }
 
 .toast {

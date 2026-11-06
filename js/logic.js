@@ -25,6 +25,8 @@ export const INTENSITY = {
   hard: { label: 'きつい', mets: 6 },
 };
 
+export const CARDIO = { walk: 'ウォーキング', run: 'ランニング' };
+
 export const MUSCLE_GROUPS = {
   chest: '胸', back: '背中', shoulders: '肩', arms: '腕', legs: '脚', core: '体幹', fullBody: '全身', other: 'その他',
 };
@@ -129,6 +131,38 @@ export function workoutBurn(workout, weightKg) {
   return Math.max(mets - 1, 0) * weightKg * (Math.max(workout.durationMinutes, 0) / 60) * 1.05;
 }
 
+// ---------- 有酸素 ----------
+
+/** 歩幅の目安（身長 × 0.45）。km単位。 */
+export const strideKm = (heightCm) => (heightCm * 0.45) / 100000;
+
+export function cardioDistanceKm(entry, heightCm) {
+  if (entry.type === 'walk') return (entry.steps ?? 0) * strideKm(heightCm);
+  return entry.distanceKm ?? 0;
+}
+
+/**
+ * 有酸素運動の消費。基礎代謝は別に数えているので、安静時の分を除いた正味の値にする。
+ * ACSMの代謝計算式（平地）をもとに、歩行は 0.5、走行は 1.0 kcal/kg/km。
+ * 走行は速さによらず、距離と体重でほぼ決まる。
+ */
+export function cardioBurn(entry, weightKg, heightCm) {
+  const perKgKm = entry.type === 'run' ? 1.0 : 0.5;
+  return perKgKm * weightKg * cardioDistanceKm(entry, heightCm);
+}
+
+/** 1kmあたりのペース（分）。時間か距離がなければ null。 */
+export function paceMinutesPerKm(entry, heightCm) {
+  const km = cardioDistanceKm(entry, heightCm);
+  return entry.durationMinutes > 0 && km > 0 ? entry.durationMinutes / km : null;
+}
+
+export function fmtPace(minutes) {
+  if (minutes === null) return null;
+  const total = Math.round(minutes * 60);
+  return `${Math.floor(total / 60)}分${String(total % 60).padStart(2, '0')}秒/km`;
+}
+
 export function weightOn(data, date) {
   const end = addDays(date, 1).getTime();
   let latest = null;
@@ -148,11 +182,14 @@ export function dayBalance(data, date) {
   const basal = bmr({ sex: profile.sex, weightKg: weight, heightCm: profile.heightCm, age: ageOn(profile.birthDate, day) });
   const dailyActivity = basal * ((ACTIVITY[profile.activity]?.factor ?? 1.2) - 1);
   const burn = data.workouts.filter((w) => sameDay(w.date, day)).reduce((sum, w) => sum + workoutBurn(w, weight), 0);
+  const cardio = data.cardio
+    .filter((c) => sameDay(c.date, day))
+    .reduce((sum, c) => sum + cardioBurn(c, weight, profile.heightCm), 0);
   const intake = meals.reduce((sum, m) => sum + m.kcal, 0);
-  const expenditure = basal + dailyActivity + burn;
+  const expenditure = basal + dailyActivity + burn + cardio;
   const target = GOALS[profile.goal]?.balance ?? 0;
   return {
-    date: day, intake, basal, dailyActivity, workoutBurn: burn, expenditure, target,
+    date: day, intake, basal, dailyActivity, workoutBurn: burn, cardioBurn: cardio, expenditure, target,
     balance: intake - expenditure,
     targetIntake: expenditure + target,
     remaining: expenditure + target - intake,
@@ -402,7 +439,7 @@ export function newId() {
 // ---------- データの読み込みと検証 ----------
 
 export const emptyData = () => ({
-  profile: null, workouts: [], meals: [], weights: [], customExercises: [], customFoods: [], lastBackupAt: null,
+  profile: null, workouts: [], cardio: [], meals: [], weights: [], customExercises: [], customFoods: [], lastBackupAt: null,
 });
 
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -437,7 +474,7 @@ function cleanFood(raw) {
  */
 export function normalizeData(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('記録のファイルではありません');
-  const known = ['profile', 'workouts', 'meals', 'weights', 'customExercises', 'customFoods'];
+  const known = ['profile', 'workouts', 'cardio', 'meals', 'weights', 'customExercises', 'customFoods'];
   if (!known.some((key) => key in raw)) throw new Error('記録のファイルではありません');
 
   const data = emptyData();
@@ -467,6 +504,17 @@ export function normalizeData(raw) {
       })),
     })),
   }));
+  data.cardio = list(raw.cardio)
+    .filter((c) => c && validDate(c.date) && Object.hasOwn(CARDIO, c.type))
+    .map((c) => ({
+      id: str(c.id) || newId(),
+      date: c.date,
+      type: c.type,
+      steps: c.type === 'walk' ? Math.trunc(num(c.steps)) : null,
+      distanceKm: c.type === 'run' ? num(c.distanceKm) : null,
+      durationMinutes: num(c.durationMinutes),
+      note: str(c.note),
+    }));
   data.meals = list(raw.meals).filter((m) => m && validDate(m.date)).map((m) => ({
     id: str(m.id) || newId(),
     date: m.date,

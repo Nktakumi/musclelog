@@ -1,5 +1,5 @@
 // オフラインでも開けるようにする。内容を変えたら VERSION を上げる。
-const VERSION = 'v3';
+const VERSION = 'v5';
 const CACHE = `musclelog-${VERSION}`;
 const FILES = [
   './',
@@ -17,7 +17,9 @@ const FILES = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));
+  // ブラウザのHTTPキャッシュに残った古いファイルを取り込まないよう、必ずサーバーから取り直す
+  const requests = FILES.map((file) => new Request(file, { cache: 'reload' }));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(requests)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

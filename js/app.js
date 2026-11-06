@@ -2,10 +2,10 @@
 import { EXERCISES, FOODS } from './catalog.js';
 import { balanceChart, lineChart } from './charts.js';
 import {
-  ACTIVITY, EQUIPMENT, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
-  addDays, ageOn, allPersonalBests, balanceSummary, bmr, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
-  fmtBests, fmtDate, fmtKcal, fmtKg, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
-  muscleSummary, newId, normalizeData, oneRepMaxHistory, parseDecimal, parseInteger, personalBests, previousPerformance, recentMeals, recordWeight,
+  ACTIVITY, CARDIO, EQUIPMENT, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
+  addDays, ageOn, allPersonalBests, balanceSummary, bmr, cardioBurn, cardioDistanceKm, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
+  fmtBests, fmtDate, fmtKcal, fmtKg, fmtPace, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
+  muscleSummary, newId, normalizeData, oneRepMaxHistory, paceMinutesPerKm, parseDecimal, parseInteger, personalBests, previousPerformance, recentMeals, recordWeight,
   recordedSets, sameDay, setCountOf, setMealAmount, startOfDay, toDate, usedExerciseNames, volumeOf, weeklyWeightChange,
   weightOn, workoutBurn, workoutRecords,
 } from './logic.js';
@@ -197,6 +197,7 @@ function todayView() {
   const now = new Date();
   const balance = dayBalance(data(), now);
   const workouts = data().workouts.filter((w) => sameDay(w.date, now) && !isEmptyWorkout(w));
+  const cardio = data().cardio.filter((c) => sameDay(c.date, now));
   const weight = weightOn(data(), now);
   return page({
     title: fmtDate(now),
@@ -205,8 +206,9 @@ function todayView() {
       installNotice(),
       balance ? balanceCard(balance) : null,
       h('div', { class: 'card' },
-        h('h2', null, '今日のトレーニング'),
-        workouts.length === 0 ? h('p', { class: 'muted' }, 'まだ記録がありません。筋トレタブから始められます。') : null,
+        h('h2', null, '今日の運動'),
+        workouts.length + cardio.length === 0 ? h('p', { class: 'muted' }, 'まだ記録がありません。運動タブから記録できます。') : null,
+        cardio.map((c) => h('div', { class: 'stack-sm' }, h('p', null, CARDIO[c.type]), h('p', { class: 'muted small' }, cardioSummary(c)))),
         workouts.map((w) => h('div', { class: 'stack-sm' },
           h('p', null, w.exercises.map((e) => e.name).join('、') || '種目なし'),
           h('p', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg・${w.durationMinutes}分`),
@@ -248,6 +250,7 @@ function balanceCard(b) {
     line('基礎代謝', b.basal),
     line('日常の活動', b.dailyActivity),
     line('筋トレ', b.workoutBurn),
+    b.cardioBurn > 0 ? line('ウォーキング・ランニング', b.cardioBurn) : null,
     line('消費の合計', b.expenditure, true),
     h('p', { class: 'muted tiny' }, '消費は1日全体の推定値です。'));
 }
@@ -300,14 +303,57 @@ function weightEntryView() {
 
 // ---------- 筋トレ ----------
 
+/** 例: 8,000歩・約5.6km・40分・消費 196 kcal */
+function cardioSummary(entry) {
+  const profile = data().profile;
+  const weight = weightOn(data(), entry.date) ?? 0;
+  const km = cardioDistanceKm(entry, profile?.heightCm ?? 0);
+  const pace = entry.type === 'run' ? fmtPace(paceMinutesPerKm(entry, profile?.heightCm ?? 0)) : null;
+  return [
+    entry.type === 'walk' ? `${fmtKcal(entry.steps)}歩` : null,
+    `${entry.type === 'walk' ? '約' : ''}${fmtKg(km)}km`,
+    entry.durationMinutes > 0 ? `${displayNumber(entry.durationMinutes)}分` : null,
+    pace,
+    `消費 ${fmtKcal(cardioBurn(entry, weight, profile?.heightCm ?? 0))} kcal`,
+  ].filter(Boolean).join('・');
+}
+
+function chooseActivity() {
+  const close = () => overlay.remove();
+  const choice = (label, action) => button(label, () => { close(); action(); }, 'tonal wide');
+  const overlay = h('div', { class: 'overlay', onclick: (e) => e.target === overlay && close() },
+    h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': '記録する運動' },
+      h('p', null, '何を記録しますか？'),
+      choice('筋トレ', startWorkout),
+      choice('ウォーキング', () => push({ type: 'cardio', draft: newCardio('walk'), isNew: true })),
+      choice('ランニング', () => push({ type: 'cardio', draft: newCardio('run'), isNew: true })),
+      button('キャンセル', close, 'link')));
+  document.body.append(overlay);
+}
+
+const newCardio = (type) => ({
+  id: newId(), date: new Date().toISOString(), type, steps: type === 'walk' ? 0 : null,
+  distanceKm: type === 'run' ? 0 : null, durationMinutes: 0, note: '',
+});
+
 function workoutsView() {
-  const items = [...data().workouts].sort((a, b) => toDate(b.date) - toDate(a.date));
+  const items = [
+    ...data().workouts.map((w) => ({ kind: 'workout', date: w.date, item: w })),
+    ...data().cardio.map((c) => ({ kind: 'cardio', date: c.date, item: c })),
+  ].sort((a, b) => toDate(b.date) - toDate(a.date));
+  const cardioRow = (c) => h('button', {
+    type: 'button', class: 'list-row', onclick: () => push({ type: 'cardio', draft: structuredClone(c), isNew: false }),
+  },
+  h('span', { class: 'list-main' },
+    h('strong', null, `${fmtDate(c.date)}　${CARDIO[c.type]}`),
+    h('span', { class: 'muted small' }, cardioSummary(c))),
+  icon('right'));
   return page({
-    title: '筋トレ',
-    right: iconButton('plus', 'トレーニングを開始', startWorkout, 'accent'),
+    title: '運動',
+    right: iconButton('plus', '運動を記録', chooseActivity, 'accent'),
     content: items.length === 0
-      ? [empty('トレーニングの記録はまだありません', '下のボタンから記録を始めましょう。'), button('トレーニングを開始', startWorkout, 'primary wide')]
-      : section(null, items.map((w) => h('button', {
+      ? [empty('運動の記録はまだありません', '下のボタンから記録を始めましょう。'), button('記録する', chooseActivity, 'primary wide')]
+      : section(null, items.map(({ kind, item: w }) => (kind === 'cardio' ? cardioRow(w) : h('button', {
         type: 'button', class: 'list-row', onclick: () => push(workoutPage(w.id)),
       },
       h('span', { class: 'list-main' },
@@ -315,7 +361,67 @@ function workoutsView() {
         h('span', { class: 'clamp' }, w.exercises.map((e) => e.name).join('、') || 'メモのみ'),
         h('span', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg`),
         recordLine(w)),
-      icon('right')))),
+      icon('right'))))),
+  });
+}
+
+function cardioView(view) {
+  const entry = view.draft;
+  const isWalk = entry.type === 'walk';
+  const profile = data().profile;
+  const estimate = h('p', { class: 'footnote tnum' });
+  const valid = () => (isWalk ? entry.steps > 0 : entry.distanceKm > 0);
+  const saveBtn = button('保存', () => {
+    const list = data().cardio;
+    const index = list.findIndex((c) => c.id === entry.id);
+    if (index >= 0) list[index] = entry;
+    else list.push(entry);
+    commit();
+    pop();
+  }, 'link strong');
+  const refresh = () => {
+    saveBtn.disabled = !valid();
+    estimate.textContent = valid() ? cardioSummary(entry) : '';
+  };
+  refresh();
+  const set = (key) => (value) => { entry[key] = value; refresh(); };
+
+  return page({
+    title: CARDIO[entry.type],
+    left: cancelButton(),
+    right: saveBtn,
+    content: [
+      section(null,
+        row('日付', h('input', {
+          type: 'date', value: dayKey(entry.date), max: dayKey(new Date()),
+          onchange: (e) => {
+            const date = dateFromKey(e.target.value);
+            if (date) entry.date = date.toISOString();
+            else e.target.value = dayKey(entry.date);
+          },
+        })),
+        isWalk
+          ? row('歩数', numberField({ value: entry.steps, integer: true, label: '歩数', onChange: (v) => set('steps')(Math.min(v, 200000)) }), '歩')
+          : row('距離', numberField({ value: entry.distanceKm, label: '距離', onChange: (v) => set('distanceKm')(Math.min(v, 500)) }), 'km'),
+        row('時間（任意）', numberField({ value: entry.durationMinutes, label: '時間', onChange: (v) => set('durationMinutes')(Math.min(v, 1440)) }), '分')),
+      estimate,
+      footnote(isWalk
+        ? `距離は身長から歩幅（${Math.round((profile?.heightCm ?? 0) * 0.45)}cm）を推定して計算します。普段の生活で歩いた分は「日常の活動」に含まれるので、運動として歩いた分だけを入れてください。`
+        : '消費は距離と体重から計算します。走る速さによる差は小さいため、時間はペースの表示にだけ使います。'),
+      section('メモ', h('textarea', {
+        rows: 2, placeholder: 'コースや調子など', 'aria-label': 'メモ', value: entry.note,
+        oninput: (e) => { entry.note = e.target.value; },
+      })),
+      view.isNew ? null : button('この記録を削除', () => confirmDialog({
+        message: 'この記録を削除しますか？',
+        confirmLabel: '削除',
+        onConfirm: () => {
+          data().cardio = data().cardio.filter((c) => c.id !== entry.id);
+          commit();
+          pop();
+        },
+      }), 'danger-text wide'),
+    ],
   });
 }
 
@@ -1118,7 +1224,7 @@ async function importData(event) {
 
 const TABS = [
   ['today', '今日', todayView],
-  ['workouts', '筋トレ', workoutsView],
+  ['workouts', '運動', workoutsView],
   ['meals', '食事', mealsView],
   ['trends', '推移', trendsView],
   ['settings', '設定', settingsView],
@@ -1129,6 +1235,7 @@ const STACK_VIEWS = {
   weightEntry: weightEntryView,
   weightHistory: weightHistoryView,
   workout: workoutDetailView,
+  cardio: cardioView,
   exercisePicker: exercisePickerView,
   foodPicker: foodPickerView,
   mealEditor: mealEditorView,
