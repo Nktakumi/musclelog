@@ -216,6 +216,32 @@ export function balanceSummary(days) {
 
 export const weeklyWeightChange = (averageBalance) => (averageBalance * 7) / KCAL_PER_KG_FAT;
 
+// ---------- カレンダー ----------
+
+/** 月の各日に、筋トレと有酸素運動をしたかどうか。キーは dayKey。 */
+export function activityDays(data, year, monthIndex) {
+  const days = new Map();
+  const mark = (date, key) => {
+    const d = toDate(date);
+    if (d.getFullYear() !== year || d.getMonth() !== monthIndex) return;
+    const k = dayKey(d);
+    days.set(k, { strength: false, cardio: false, ...days.get(k), [key]: true });
+  };
+  data.workouts.filter((w) => !isEmptyWorkout(w)).forEach((w) => mark(w.date, 'strength'));
+  data.cardio.forEach((c) => mark(c.date, 'cardio'));
+  return days;
+}
+
+/** カレンダーのマス。日曜はじまりで、前後の月の分は null。 */
+export function monthGrid(year, monthIndex) {
+  const first = new Date(year, monthIndex, 1);
+  const count = new Date(year, monthIndex + 1, 0).getDate();
+  const cells = Array(first.getDay()).fill(null);
+  for (let day = 1; day <= count; day += 1) cells.push(new Date(year, monthIndex, day, 12));
+  while (cells.length % 7) cells.push(null);
+  return cells;
+}
+
 // ---------- 筋トレ ----------
 
 export const epley = (weightKg, reps) => {

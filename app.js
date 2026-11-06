@@ -2,7 +2,7 @@
 import { EXERCISES, FOODS } from './catalog.js';
 import { balanceChart, lineChart } from './charts.js';
 import {
-  ACTIVITY, CARDIO, EQUIPMENT, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
+  ACTIVITY, CARDIO, EQUIPMENT, activityDays, monthGrid, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
   addDays, ageOn, allPersonalBests, balanceSummary, bmr, cardioBurn, cardioDistanceKm, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
   fmtBests, fmtDate, fmtKcal, fmtKg, fmtPace, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
   muscleSummary, newId, normalizeData, oneRepMaxHistory, paceMinutesPerKm, parseDecimal, parseInteger, personalBests, previousPerformance, recentMeals, recordWeight,
@@ -123,6 +123,9 @@ const state = {
   stack: [],
   mealDate: new Date(),
   period: 7,
+  /** 運動タブのカレンダーで表示している月（その月の1日）と、選んだ日 */
+  calendarMonth: null,
+  calendarDay: null,
   exerciseName: null,
   scroll: {},
 };
@@ -336,11 +339,63 @@ const newCardio = (type) => ({
   distanceKm: type === 'run' ? 0 : null, durationMinutes: 0, note: '',
 });
 
+const WEEK_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+
+function calendarCard() {
+  const today = new Date();
+  const month = state.calendarMonth ?? new Date(today.getFullYear(), today.getMonth(), 1);
+  const year = month.getFullYear();
+  const index = month.getMonth();
+  const marks = activityDays(data(), year, index);
+  const strengthDays = [...marks.values()].filter((m) => m.strength).length;
+  const activeDays = marks.size;
+  const isCurrent = year === today.getFullYear() && index === today.getMonth();
+  const move = (delta) => {
+    state.calendarMonth = new Date(year, index + delta, 1);
+    state.calendarDay = null;
+    render();
+  };
+
+  const cell = (date) => {
+    if (!date) return h('span', { class: 'cal-cell', 'aria-hidden': 'true' });
+    const key = dayKey(date);
+    const mark = marks.get(key);
+    const kinds = [mark?.strength ? '筋トレ' : null, mark?.cardio ? 'ウォーキング・ランニング' : null].filter(Boolean);
+    const classes = ['cal-cell', 'cal-day',
+      mark?.strength ? 'has-strength' : '', mark?.cardio ? 'has-cardio' : '',
+      sameDay(date, today) ? 'is-today' : '', state.calendarDay === key ? 'is-selected' : ''].join(' ');
+    return h('button', {
+      type: 'button', class: classes, 'aria-pressed': state.calendarDay === key ? 'true' : 'false',
+      'aria-label': `${index + 1}月${date.getDate()}日${kinds.length ? `、${kinds.join('と')}` : ''}`,
+      onclick: () => {
+        state.calendarDay = state.calendarDay === key ? null : key;
+        render();
+      },
+    }, h('span', { class: 'cal-num tnum' }, date.getDate()), h('span', { class: 'cal-dot', 'aria-hidden': 'true' }));
+  };
+
+  return h('div', { class: 'card calendar' },
+    h('div', { class: 'cal-head' },
+      iconButton('left', '前の月', () => move(-1)),
+      h('div', { class: 'cal-title' },
+        h('h2', null, `${year}年${index + 1}月`),
+        h('p', { class: 'muted small tnum' }, `筋トレ ${strengthDays}日・運動した日 ${activeDays}日`)),
+      iconButton('right', '次の月', () => move(1), '', { disabled: isCurrent })),
+    h('div', { class: 'cal-grid', role: 'group', 'aria-label': `${year}年${index + 1}月のカレンダー` },
+      WEEK_LABELS.map((w) => h('span', { class: 'cal-week', 'aria-hidden': 'true' }, w)),
+      monthGrid(year, index).map(cell)),
+    h('div', { class: 'legend' },
+      h('span', null, h('span', { class: 'swatch strength' }), '筋トレ'),
+      h('span', null, h('span', { class: 'swatch cardio' }), 'ウォーキング・ランニング')));
+}
+
 function workoutsView() {
-  const items = [
+  const all = [
     ...data().workouts.map((w) => ({ kind: 'workout', date: w.date, item: w })),
     ...data().cardio.map((c) => ({ kind: 'cardio', date: c.date, item: c })),
   ].sort((a, b) => toDate(b.date) - toDate(a.date));
+  const selected = state.calendarDay;
+  const items = selected ? all.filter((entry) => dayKey(entry.date) === selected) : all;
   const cardioRow = (c) => h('button', {
     type: 'button', class: 'list-row', onclick: () => push({ type: 'cardio', draft: structuredClone(c), isNew: false }),
   },
@@ -351,9 +406,16 @@ function workoutsView() {
   return page({
     title: '運動',
     right: iconButton('plus', '運動を記録', chooseActivity, 'accent'),
-    content: items.length === 0
-      ? [empty('運動の記録はまだありません', '下のボタンから記録を始めましょう。'), button('記録する', chooseActivity, 'primary wide')]
-      : section(null, items.map(({ kind, item: w }) => (kind === 'cardio' ? cardioRow(w) : h('button', {
+    content: [
+      calendarCard(),
+      selected ? h('div', { class: 'filter-bar' },
+        h('span', null, `${fmtDate(dateFromKey(selected))}の記録`),
+        button('すべて表示', () => { state.calendarDay = null; render(); }, 'link small')) : null,
+      items.length === 0 && selected ? empty('この日の記録はありません') : null,
+      items.length === 0 && !selected
+        ? [empty('運動の記録はまだありません', '下のボタンから記録を始めましょう。'), button('記録する', chooseActivity, 'primary wide')]
+        : null,
+      items.length ? section(null, items.map(({ kind, item: w }) => (kind === 'cardio' ? cardioRow(w) : h('button', {
         type: 'button', class: 'list-row', onclick: () => push(workoutPage(w.id)),
       },
       h('span', { class: 'list-main' },
@@ -361,7 +423,8 @@ function workoutsView() {
         h('span', { class: 'clamp' }, w.exercises.map((e) => e.name).join('、') || 'メモのみ'),
         h('span', { class: 'muted small' }, `${setCountOf(w)}セット・総負荷 ${fmtKcal(volumeOf(w))} kg`),
         recordLine(w)),
-      icon('right'))))),
+      icon('right'))))) : null,
+    ],
   });
 }
 
