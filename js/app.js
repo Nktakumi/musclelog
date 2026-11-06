@@ -2,8 +2,8 @@
 import { EXERCISES, FOODS } from './catalog.js';
 import { balanceChart, lineChart } from './charts.js';
 import {
-  ACTIVITY, CARDIO, EQUIPMENT, PROTEIN_LEVELS, REST_OPTIONS, activityDays, fmtTimer, monthGrid, proteinIntake,
-  proteinTarget, remainingSeconds, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
+  ACTIVITY, CARDIO, EQUIPMENT, PROTEIN_LEVELS, REST_MAX, REST_MIN, activityDays, fmtTimer, monthGrid, proteinIntake,
+  proteinTarget, remainingSeconds, restOptions, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
   addDays, ageOn, allPersonalBests, balanceSummary, bmr, cardioBurn, cardioDistanceKm, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
   fmtBests, fmtDate, fmtKcal, fmtKg, fmtPace, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
   muscleSummary, newId, normalizeData, oneRepMaxHistory, paceMinutesPerKm, parseDecimal, parseInteger, personalBests, previousPerformance, recentMeals, recordWeight,
@@ -1248,7 +1248,7 @@ function settingsView() {
     content: [
       profileForm({ onboarding: false }),
       section('トレーニング',
-        row('休憩時間', select(REST_OPTIONS, data().settings.restSeconds, (v) => {
+        row('休憩時間', select(restOptions(data().settings.restSeconds), data().settings.restSeconds, (v) => {
           data().settings.restSeconds = Number(v);
           commit();
         }, '休憩時間')),
@@ -1257,7 +1257,7 @@ function settingsView() {
             type: 'checkbox', role: 'switch', class: 'switch', checked: data().settings.restAutoStart,
             onchange: (e) => { data().settings.restAutoStart = e.target.checked; commit(); },
           }))),
-      footnote('トレーニング画面の右上の「休憩」からも始められます。'),
+      footnote('タイマーを±15秒で調整すると、次回からその時間で始まります。トレーニング画面の右上の「休憩」からも始められます。'),
       section('たんぱく質の目標',
         row('1日の目標', select(PROTEIN_LEVELS, String(data().settings.proteinPerKg), (v) => {
           data().settings.proteinPerKg = Number(v);
@@ -1334,7 +1334,7 @@ async function importData(event) {
 // 画面を描き直しても消えないよう、#app の外に置く。
 // 終了時刻を持っておき、アプリが裏に回っていても戻ったときに正しい残り時間を出す。
 
-const rest = { endAt: null, interval: null, node: null, audio: null, done: false };
+const rest = { endAt: null, length: 0, interval: null, node: null, audio: null, done: false };
 
 function startRest(seconds = data().settings.restSeconds) {
   // 音はユーザーの操作の中で準備しないと鳴らせないため、ここで用意する
@@ -1345,6 +1345,7 @@ function startRest(seconds = data().settings.restSeconds) {
     rest.audio = null;
   }
   rest.endAt = Date.now() + seconds * 1000;
+  rest.length = seconds;
   rest.done = false;
   showRest();
   updateRest();
@@ -1361,12 +1362,20 @@ function stopRest() {
   document.body.classList.remove('resting');
 }
 
+/** 調整した長さを覚えて、次回もその時間で始める */
 function adjustRest(deltaSeconds) {
   if (rest.done) {
+    // 終わった後の +15秒 は延長なので、覚える長さは変えない
     if (deltaSeconds > 0) startRest(deltaSeconds);
     return;
   }
-  rest.endAt = Math.max(rest.endAt + deltaSeconds * 1000, Date.now());
+  const length = Math.min(Math.max(rest.length + deltaSeconds, REST_MIN), REST_MAX);
+  const applied = length - rest.length;
+  if (!applied) return;
+  rest.length = length;
+  rest.endAt = Math.max(rest.endAt + applied * 1000, Date.now());
+  data().settings.restSeconds = length;
+  commit();
   updateRest();
 }
 

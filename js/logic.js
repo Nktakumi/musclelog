@@ -28,6 +28,25 @@ export const INTENSITY = {
 export const CARDIO = { walk: 'ウォーキング', run: 'ランニング' };
 
 export const REST_OPTIONS = { 60: '60秒', 90: '90秒', 120: '2分', 150: '2分30秒', 180: '3分', 240: '4分' };
+export const REST_MIN = 15;
+export const REST_MAX = 900;
+
+/** 例: 135 → 2分15秒 */
+export function restLabel(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (!m) return `${s}秒`;
+  return s ? `${m}分${s}秒` : `${m}分`;
+}
+
+/** 選択肢に今の値がなければ足す（±15秒で調整した値を表示するため） */
+export function restOptions(current) {
+  if (Object.hasOwn(REST_OPTIONS, String(current))) return REST_OPTIONS;
+  return Object.fromEntries(
+    [...Object.entries(REST_OPTIONS), [String(current), `${restLabel(current)}（前回）`]]
+      .sort((a, b) => Number(a[0]) - Number(b[0])),
+  );
+}
 
 /** 体重1kgあたりのたんぱく質の目標（g） */
 export const PROTEIN_LEVELS = {
@@ -598,7 +617,7 @@ export function normalizeData(raw) {
   data.lastBackupAt = validDate(raw.lastBackupAt) ? raw.lastBackupAt : null;
   const s = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
   data.settings = {
-    restSeconds: Object.hasOwn(REST_OPTIONS, String(s.restSeconds)) ? s.restSeconds : 90,
+    restSeconds: Number.isInteger(s.restSeconds) && s.restSeconds >= REST_MIN && s.restSeconds <= REST_MAX ? s.restSeconds : 90,
     restAutoStart: typeof s.restAutoStart === 'boolean' ? s.restAutoStart : true,
     proteinPerKg: Object.hasOwn(PROTEIN_LEVELS, String(s.proteinPerKg)) ? s.proteinPerKg : 1.6,
   };
