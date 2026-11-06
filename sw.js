@@ -1,5 +1,5 @@
 // オフラインでも開けるようにする。内容を変えたら VERSION を上げる。
-const VERSION = 'v11';
+const VERSION = 'v12';
 const CACHE = `musclelog-${VERSION}`;
 const FILES = [
   './',

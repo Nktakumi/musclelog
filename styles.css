@@ -262,6 +262,7 @@ textarea:focus { outline: none; }
   text-align: left;
 }
 .add-row .icon { width: 18px; height: 18px; }
+a.add-row { text-decoration: none; }
 
 .footnote { font-size: 13px; color: var(--muted); padding: 0 16px; margin-top: -8px; }
 

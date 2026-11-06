@@ -1274,6 +1274,7 @@ function settingsView() {
         h('button', { type: 'button', class: 'add-row', onclick: () => fileInput.click() }, 'ファイルから読み込む'),
         fileInput),
       footnote('記録はこの端末のブラウザ内にだけ保存され、サーバーには送信されません。アプリを削除すると消えるので、ときどき書き出してiCloud Driveなどに保存してください。'),
+      section(null, h('a', { class: 'add-row', href: 'about/' }, 'このアプリについて（友達への紹介にも）')),
     ],
   });
 }
