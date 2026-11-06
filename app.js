@@ -1479,6 +1479,24 @@ function render() {
   if (screen) screen.scrollTop = state.scroll[currentKey()] ?? 0;
 }
 
+/**
+ * iPhoneのSafariでは、ボタンを素早く続けて押すと2回タップとみなされて拡大されることがある。
+ * ボタンの2回目のタップでは拡大の動作を止め、押した操作だけを行う。
+ * 入力欄の文字選択や2本指の拡大には影響しないよう、ボタンだけを対象にする。
+ */
+function preventDoubleTapZoom() {
+  let lastEnd = 0;
+  document.addEventListener('touchend', (event) => {
+    const now = Date.now();
+    const target = event.target.closest?.('button');
+    if (target && now - lastEnd < 400 && event.cancelable) {
+      event.preventDefault();
+      if (!target.disabled) target.click();
+    }
+    lastEnd = now;
+  }, { passive: false });
+}
+
 async function start() {
   // 再読み込みすると重なった画面は消えるので、履歴上の位置もそろえる
   history.replaceState({ depth: 0 }, '');
@@ -1495,6 +1513,7 @@ async function start() {
     else if (!stack.length && !document.activeElement?.matches('input, textarea, select')) render();
   });
   window.addEventListener('pagehide', () => store.flush());
+  preventDoubleTapZoom();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
