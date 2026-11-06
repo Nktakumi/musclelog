@@ -177,7 +177,7 @@ export const FOODS = [
   {"name":"玄米（炊飯後）","category":"staple","baseAmount":100,"unit":"g","defaultAmount":150.0,"nutrition":{"kcal":152.0,"proteinG":2.8,"fatG":1.0,"carbsG":35.6}},
   {"name":"オートミール","category":"staple","baseAmount":100,"unit":"g","defaultAmount":40.0,"nutrition":{"kcal":350.0,"proteinG":13.7,"fatG":5.7,"carbsG":69.1}},
   {"name":"うどん（ゆで）","category":"staple","baseAmount":100,"unit":"g","defaultAmount":200.0,"nutrition":{"kcal":95.0,"proteinG":2.6,"fatG":0.4,"carbsG":21.6}},
-  {"name":"パスタ（ゆで）","category":"staple","baseAmount":100,"unit":"g","defaultAmount":200.0,"nutrition":{"kcal":150.0,"proteinG":5.8,"fatG":0.9,"carbsG":32.2}},
+  {"name":"パスタ（乾麺・ゆでる前）","category":"staple","baseAmount":100,"unit":"g","defaultAmount":100.0,"nutrition":{"kcal":347.0,"proteinG":12.9,"fatG":1.8,"carbsG":73.1}},
   {"name":"さつまいも（蒸し）","category":"staple","baseAmount":100,"unit":"g","defaultAmount":100.0,"nutrition":{"kcal":134.0,"proteinG":1.2,"fatG":0.2,"carbsG":31.9}},
   {"name":"食パン（6枚切り）","category":"staple","baseAmount":1,"unit":"枚","defaultAmount":1,"nutrition":{"kcal":149.0,"proteinG":5.3,"fatG":2.5,"carbsG":27.8}},
   {"name":"鶏むね肉（皮なし・生）","category":"meat","baseAmount":100,"unit":"g","defaultAmount":150.0,"nutrition":{"kcal":105.0,"proteinG":23.3,"fatG":1.9,"carbsG":0.1}},
