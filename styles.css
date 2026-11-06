@@ -35,7 +35,8 @@
   }
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* 2回タップでの拡大を止める。2本指での拡大はそのまま使える。 */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
 html, body { height: 100%; margin: 0; }
 
