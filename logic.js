@@ -27,6 +27,18 @@ export const INTENSITY = {
 
 export const CARDIO = { walk: 'ウォーキング', run: 'ランニング' };
 
+export const REST_OPTIONS = { 60: '60秒', 90: '90秒', 120: '2分', 150: '2分30秒', 180: '3分', 240: '4分' };
+
+/** 体重1kgあたりのたんぱく質の目標（g） */
+export const PROTEIN_LEVELS = {
+  '1.2': '体重 × 1.2g',
+  '1.6': '体重 × 1.6g（筋トレ時の目安）',
+  '2': '体重 × 2.0g',
+  '2.2': '体重 × 2.2g（減量中など）',
+};
+
+export const defaultSettings = () => ({ restSeconds: 90, restAutoStart: true, proteinPerKg: 1.6 });
+
 export const MUSCLE_GROUPS = {
   chest: '胸', back: '背中', shoulders: '肩', arms: '腕', legs: '脚', core: '体幹', fullBody: '全身', other: 'その他',
 };
@@ -240,6 +252,25 @@ export function monthGrid(year, monthIndex) {
   for (let day = 1; day <= count; day += 1) cells.push(new Date(year, monthIndex, day, 12));
   while (cells.length % 7) cells.push(null);
   return cells;
+}
+
+// ---------- たんぱく質 ----------
+
+export function proteinTarget(data, date) {
+  const weight = weightOn(data, date);
+  return weight ? weight * data.settings.proteinPerKg : null;
+}
+
+/** たんぱく質を入力した食事だけを合計する */
+export const proteinIntake = (data, date) =>
+  data.meals.filter((m) => sameDay(m.date, date)).reduce((sum, m) => sum + (m.proteinG ?? 0), 0);
+
+// ---------- 休憩タイマー ----------
+
+export const remainingSeconds = (endAt, now) => Math.max(Math.ceil((endAt - now) / 1000), 0);
+
+export function fmtTimer(seconds) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 // ---------- 筋トレ ----------
@@ -465,7 +496,7 @@ export function newId() {
 // ---------- データの読み込みと検証 ----------
 
 export const emptyData = () => ({
-  profile: null, workouts: [], cardio: [], meals: [], weights: [], customExercises: [], customFoods: [], lastBackupAt: null,
+  settings: defaultSettings(), profile: null, workouts: [], cardio: [], meals: [], weights: [], customExercises: [], customFoods: [], lastBackupAt: null,
 });
 
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -565,6 +596,12 @@ export function normalizeData(raw) {
   }));
   data.customFoods = list(raw.customFoods).map(cleanFood).filter(Boolean);
   data.lastBackupAt = validDate(raw.lastBackupAt) ? raw.lastBackupAt : null;
+  const s = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
+  data.settings = {
+    restSeconds: Object.hasOwn(REST_OPTIONS, String(s.restSeconds)) ? s.restSeconds : 90,
+    restAutoStart: typeof s.restAutoStart === 'boolean' ? s.restAutoStart : true,
+    proteinPerKg: Object.hasOwn(PROTEIN_LEVELS, String(s.proteinPerKg)) ? s.proteinPerKg : 1.6,
+  };
   // 開始しただけで何も入力していないトレーニングは残さない
   data.workouts = data.workouts.filter((w) => !isEmptyWorkout(w));
   return data;

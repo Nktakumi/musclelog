@@ -2,7 +2,8 @@
 import { EXERCISES, FOODS } from './catalog.js';
 import { balanceChart, lineChart } from './charts.js';
 import {
-  ACTIVITY, CARDIO, EQUIPMENT, activityDays, monthGrid, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
+  ACTIVITY, CARDIO, EQUIPMENT, PROTEIN_LEVELS, REST_OPTIONS, activityDays, fmtTimer, monthGrid, proteinIntake,
+  proteinTarget, remainingSeconds, FOOD_CATEGORIES, FOOD_UNITS, GOALS, INTENSITY, MEAL_TYPES, MUSCLE_GROUPS, SEX,
   addDays, ageOn, allPersonalBests, balanceSummary, bmr, cardioBurn, cardioDistanceKm, dateFromKey, dayBalance, dayBalances, dayKey, displayNumber,
   fmtBests, fmtDate, fmtKcal, fmtKg, fmtPace, fmtSet, fmtSigned, foodNutrition, foodStep, isEmptyWorkout, matchesSearch, mealAmountLabel,
   muscleSummary, newId, normalizeData, oneRepMaxHistory, paceMinutesPerKm, parseDecimal, parseInteger, personalBests, previousPerformance, recentMeals, recordWeight,
@@ -45,6 +46,7 @@ const ICONS = {
   meal: stroke('<path d="M7 3v8M4 3v5a3 3 0 0 0 6 0V3M7 11v10M17 3c-2 1-3 4-3 7 0 2 1 3 3 3zm0 10v8"/>'),
   trends: stroke('<path d="M4 4v16h16"/><path d="m8 15 3.5-4 3 2.5L20 7"/>'),
   settings: stroke('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/>'),
+  timer: stroke('<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 3h5"/>'),
   star: stroke('<path d="m12 4 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/>'),
   plus: stroke('<path d="M12 5v14M5 12h14"/>'),
   minus: stroke('<path d="M5 12h14"/>'),
@@ -208,6 +210,7 @@ function todayView() {
       backupNotice(),
       installNotice(),
       balance ? balanceCard(balance) : null,
+      proteinCard(now),
       h('div', { class: 'card' },
         h('h2', null, '今日の運動'),
         workouts.length + cardio.length === 0 ? h('p', { class: 'muted' }, 'まだ記録がありません。運動タブから記録できます。') : null,
@@ -256,6 +259,23 @@ function balanceCard(b) {
     b.cardioBurn > 0 ? line('ウォーキング・ランニング', b.cardioBurn) : null,
     line('消費の合計', b.expenditure, true),
     h('p', { class: 'muted tiny' }, '消費は1日全体の推定値です。'));
+}
+
+function proteinCard(date) {
+  const target = proteinTarget(data(), date);
+  if (!target) return null;
+  const intake = proteinIntake(data(), date);
+  const percent = Math.min(intake / target, 1) * 100;
+  const left = target - intake;
+  return h('div', { class: 'card' },
+    h('div', { class: 'card-head' },
+      h('h2', null, 'たんぱく質'),
+      h('span', { class: 'tnum' }, h('strong', null, fmtKg(intake)), ` / ${fmtKcal(target)} g`)),
+    h('div', {
+      class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(percent), 'aria-label': 'たんぱく質の目標に対する割合',
+    }, widthBar(percent)),
+    h('p', { class: 'small' }, left > 0 ? `目標まで、あと ${fmtKg(left)} g` : '目標に届きました'),
+    h('p', { class: 'muted tiny' }, `目標は${PROTEIN_LEVELS[String(data().settings.proteinPerKg)]}。たんぱく質を入力した食事だけを数えます。`));
 }
 
 function widthBar(percent) {
@@ -545,6 +565,7 @@ function workoutDetailView(view) {
   return page({
     title: 'トレーニング',
     left: backButton(),
+    right: h('button', { type: 'button', class: 'link strong timer-btn', onclick: () => startRest() }, icon('timer'), '休憩'),
     content: [
       section(null,
         row('日付', h('input', {
@@ -659,6 +680,8 @@ function exerciseBlock(workout, exercise, change, badgeRefreshers) {
           exercise.sets.push(set);
           drawSets();
           change();
+          // 次のセットを足すのは前のセットが終わったとき、なので休憩を始める
+          if (data().settings.restAutoStart) startRest();
         },
       }, icon('plus'), 'セットを追加')),
     previous ? footnote(`前回: ${recordedSets(previous).map(fmtSet).join('、')}`) : null,
@@ -777,7 +800,11 @@ function mealsView() {
         h('div', { class: 'line strong' },
           h('span', { class: 'tnum' }, `摂取 ${fmtKcal(balance.intake)} kcal`),
           balance.hasMeals ? h('span', { class: 'tnum' }, `収支 ${fmtSigned(balance.balance)}`) : null),
-        pfc > 0 ? h('p', { class: 'muted small' }, `たんぱく質 ${fmtKg(sum('proteinG'))}g・脂質 ${fmtKg(sum('fatG'))}g・炭水化物 ${fmtKg(sum('carbsG'))}g`) : null) : null,
+        h('p', { class: 'muted small tnum' }, [
+          `たんぱく質 ${fmtKg(sum('proteinG'))}${proteinTarget(data(), date) ? ` / ${fmtKcal(proteinTarget(data(), date))}` : ''}g`,
+          pfc > 0 ? `脂質 ${fmtKg(sum('fatG'))}g` : null,
+          pfc > 0 ? `炭水化物 ${fmtKg(sum('carbsG'))}g` : null,
+        ].filter(Boolean).join('・'))) : null,
       Object.entries(MEAL_TYPES).map(([type, label]) => section(label,
         meals.filter((m) => m.type === type).map((meal) => h('button', {
           type: 'button', class: 'list-row',
@@ -1220,6 +1247,26 @@ function settingsView() {
     title: '設定',
     content: [
       profileForm({ onboarding: false }),
+      section('トレーニング',
+        row('休憩時間', select(REST_OPTIONS, data().settings.restSeconds, (v) => {
+          data().settings.restSeconds = Number(v);
+          commit();
+        }, '休憩時間')),
+        h('label', { class: 'row' }, h('span', { class: 'row-label' }, 'セットを追加したら休憩を始める'),
+          h('input', {
+            type: 'checkbox', role: 'switch', class: 'switch', checked: data().settings.restAutoStart,
+            onchange: (e) => { data().settings.restAutoStart = e.target.checked; commit(); },
+          }))),
+      footnote('トレーニング画面の右上の「休憩」からも始められます。'),
+      section('たんぱく質の目標',
+        row('1日の目標', select(PROTEIN_LEVELS, String(data().settings.proteinPerKg), (v) => {
+          data().settings.proteinPerKg = Number(v);
+          commit();
+          render();
+        }, 'たんぱく質の目標')),
+        h('div', { class: 'row' }, h('span', { class: 'row-label' }, '今日の目標量'),
+          h('span', { class: 'muted tnum' }, `${fmtKcal(proteinTarget(data(), new Date()) ?? 0)} g`))),
+      footnote('体重はその日時点の記録を使います。持病がある場合などは、医師の指示を優先してください。'),
       section('バックアップ',
         h('div', { class: 'row' }, h('span', { class: 'row-label' }, '最後のバックアップ'),
           h('span', { class: 'muted tnum' }, lastBackupAt ? fmtDate(lastBackupAt) : 'なし')),
@@ -1282,6 +1329,96 @@ async function importData(event) {
     },
   });
 }
+
+// ---------- 休憩タイマー ----------
+// 画面を描き直しても消えないよう、#app の外に置く。
+// 終了時刻を持っておき、アプリが裏に回っていても戻ったときに正しい残り時間を出す。
+
+const rest = { endAt: null, interval: null, node: null, audio: null, done: false };
+
+function startRest(seconds = data().settings.restSeconds) {
+  // 音はユーザーの操作の中で準備しないと鳴らせないため、ここで用意する
+  try {
+    rest.audio ??= new (window.AudioContext || window.webkitAudioContext)();
+    rest.audio.resume();
+  } catch {
+    rest.audio = null;
+  }
+  rest.endAt = Date.now() + seconds * 1000;
+  rest.done = false;
+  showRest();
+  updateRest();
+  clearInterval(rest.interval);
+  rest.interval = setInterval(updateRest, 250);
+}
+
+function stopRest() {
+  clearInterval(rest.interval);
+  rest.interval = null;
+  rest.endAt = null;
+  rest.node?.remove();
+  rest.node = null;
+  document.body.classList.remove('resting');
+}
+
+function adjustRest(deltaSeconds) {
+  if (rest.done) {
+    if (deltaSeconds > 0) startRest(deltaSeconds);
+    return;
+  }
+  rest.endAt = Math.max(rest.endAt + deltaSeconds * 1000, Date.now());
+  updateRest();
+}
+
+function showRest() {
+  if (rest.node) return;
+  rest.node = h('div', { class: 'rest-bar', role: 'timer', 'aria-label': '休憩タイマー' },
+    h('div', { class: 'rest-main' },
+      h('span', { class: 'rest-label' }, '休憩'),
+      h('span', { class: 'rest-time tnum' }),
+      h('span', { class: 'visually-hidden', 'aria-live': 'polite' })),
+    button('−15秒', () => adjustRest(-15), 'rest-adjust'),
+    button('+15秒', () => adjustRest(15), 'rest-adjust'),
+    button('終了', stopRest, 'rest-stop'));
+  document.body.append(rest.node);
+  document.body.classList.add('resting');
+}
+
+function updateRest() {
+  if (!rest.node || rest.endAt === null) return;
+  const left = remainingSeconds(rest.endAt, Date.now());
+  const [label, time, live] = rest.node.querySelector('.rest-main').children;
+  time.textContent = fmtTimer(left);
+  if (left > 0 || rest.done) return;
+  rest.done = true;
+  clearInterval(rest.interval);
+  rest.node.classList.add('is-done');
+  label.textContent = '休憩終了';
+  time.textContent = '次のセットへ';
+  live.textContent = '休憩が終わりました';
+  beep();
+  navigator.vibrate?.([200, 100, 200]);
+}
+
+function beep() {
+  const ctx = rest.audio;
+  if (!ctx) return;
+  [0, 0.25, 0.5].forEach((offset) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+    gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + offset + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(ctx.currentTime + offset);
+    osc.stop(ctx.currentTime + offset + 0.2);
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') updateRest();
+});
 
 // ---------- 描画 ----------
 
